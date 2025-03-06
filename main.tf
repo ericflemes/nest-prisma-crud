@@ -1,60 +1,64 @@
-# Configure the AWS Provider
-provider "aws" {
-  region = "us-east-1"
+# Configure the Google Cloud provider
+provider "google" {
+  project = var.project_id
+  region  = var.region
+  zone    = var.zone
 }
 
-# Example VPC
-resource "aws_vpc" "main" {
-  cidr_block           = "10.0.0.0/16"
-  enable_dns_hostnames = true
-  enable_dns_support   = true
+# Cloud Run service
+resource "google_cloud_run_service" "app" {
+  name     = "nest-prisma-crud"
+  location = var.region
 
-  tags = {
-    Name = "main"
+  template {
+    spec {
+      containers {
+        image = "gcr.io/${var.project_id}/nest-prisma-crud"
+        
+        env {
+          name  = "DATABASE_URL"
+          value = google_sql_database_instance.instance.connection_name
+        }
+        
+        env {
+          name  = "REDIS_HOST"
+          value = google_redis_instance.cache.host
+        }
+      }
+    }
+  }
+
+  traffic {
+    percent         = 100
+    latest_revision = true
   }
 }
 
-# Example Public Subnet
-resource "aws_subnet" "public" {
-  vpc_id            = aws_vpc.main.id
-  cidr_block        = "10.0.1.0/24"
-  availability_zone = "us-east-1a"
+# Cloud SQL instance
+resource "google_sql_database_instance" "instance" {
+  name             = "nest-prisma-crud-db"
+  database_version = "MYSQL_8_0"
+  region           = var.region
 
-  tags = {
-    Name = "Public Subnet"
+  settings {
+    tier = "db-f1-micro"
   }
 }
 
-# Example Security Group
-resource "aws_security_group" "allow_web" {
-  name        = "allow_web_traffic"
-  description = "Allow web inbound traffic"
-  vpc_id      = aws_vpc.main.id
+# Redis instance
+resource "google_redis_instance" "cache" {
+  name           = "nest-prisma-crud-cache"
+  memory_size_gb = 1
+  region         = var.region
 
-  ingress {
-    description = "HTTPS"
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
+  redis_version = "REDIS_6_X"
+  tier          = "BASIC"
+}
 
-  ingress {
-    description = "HTTP"
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  tags = {
-    Name = "allow_web"
-  }
+# Allow unauthenticated access to Cloud Run service
+resource "google_cloud_run_service_iam_member" "public" {
+  service  = google_cloud_run_service.app.name
+  location = google_cloud_run_service.app.location
+  role     = "roles/run.invoker"
+  member   = "allUsers"
 }
