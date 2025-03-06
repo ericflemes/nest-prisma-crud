@@ -1,0 +1,124 @@
+{
+	"info": {
+		"_postman_id": "b0b0b0b0-b0b0-b0b0-b0b0-b0b0b0b0b0b0",
+		"name": "Users-CRUD-Updated",
+		"description": "A collection for testing the Users CRUD API endpoints",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Create User",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"fullName\": \"João Silva\",\n    \"email\": \"joao.silva@example.com\",\n    \"cpf\": \"078.153.166-70\",\n    \"birthDate\": \"1990-01-01\",\n    \"phoneNumber\": \"+55 11 91234-5678\",\n    \"address1\": \"Rua Principal\",\n    \"address2\": \"Apt 4B\",\n    \"address3\": \"São Paulo\",\n    \"address4\": \"SP\",\n    \"userType\": \"primary\",\n    \"brand\": \"marca-x\"\n}"
+				},
+				"url": {
+					"raw": "http://localhost:3000/users",
+					"protocol": "http",
+					"host": ["localhost"],
+					"port": "3000",
+					"path": ["users"]
+				},
+				"description": "Criar um novo usuário com todos os campos obrigatórios"
+			}
+		},
+		{
+			"name": "Get All Users",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "http://localhost:3000/users",
+					"protocol": "http",
+					"host": ["localhost"],
+					"port": "3000",
+					"path": ["users"]
+				},
+				"description": "Listar todos os usuários"
+			}
+		},
+		{
+			"name": "Get User by ID",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "http://localhost:3000/users/1",
+					"protocol": "http",
+					"host": ["localhost"],
+					"port": "3000",
+					"path": ["users", "1"]
+				},
+				"description": "Buscar um usuário específico pelo ID"
+			}
+		},
+		{
+			"name": "Search Users",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "http://localhost:3000/users/search?q=joão",
+					"protocol": "http",
+					"host": ["localhost"],
+					"port": "3000",
+					"path": ["users", "search"],
+					"query": [
+						{
+							"key": "q",
+							"value": "joão"
+						}
+					]
+				},
+				"description": "Buscar usuários por termo de pesquisa"
+			}
+		},
+		{
+			"name": "Update User",
+			"request": {
+				"method": "PATCH",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"fullName\": \"João Silva Atualizado\",\n    \"email\": \"joao.silva.novo@example.com\",\n    \"phoneNumber\": \"+55 11 98765-4321\"\n}"
+				},
+				"url": {
+					"raw": "http://localhost:3000/users/1",
+					"protocol": "http",
+					"host": ["localhost"],
+					"port": "3000",
+					"path": ["users", "1"]
+				},
+				"description": "Atualizar um usuário existente"
+			}
+		},
+		{
+			"name": "Delete User",
+			"request": {
+				"method": "DELETE",
+				"header": [],
+				"url": {
+					"raw": "http://localhost:3000/users/1",
+					"protocol": "http",
+					"host": ["localhost"],
+					"port": "3000",
+					"path": ["users", "1"]
+				},
+				"description": "Excluir um usuário"
+			}
+		}
+	]
+}

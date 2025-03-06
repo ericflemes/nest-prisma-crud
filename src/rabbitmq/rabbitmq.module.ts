@@ -1,0 +1,13 @@
+import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
+import { RabbitMQService } from './rabbitmq.service';
+import rabbitmqConfig from '../config/rabbitmq.config';
+
+@Module({
+  imports: [
+    ConfigModule.forFeature(rabbitmqConfig)
+  ],
+  providers: [RabbitMQService],
+  exports: [RabbitMQService],
+})
+export class RabbitMQModule {}

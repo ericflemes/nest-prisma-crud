@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: nest-crud-api
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      - DATABASE_URL=mysql://nest:nest123@db:3306/nest_crud
+      - RABBITMQ_URL=amqp://admin:admin123@rabbitmq:5672
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - db
+      - rabbitmq
+      - redis
+    networks:
+      - app-network
+
+  db:
+    image: mysql:8.0
+    container_name: nest-crud-db
+    restart: unless-stopped
+    environment:
+      - MYSQL_USER=nest
+      - MYSQL_PASSWORD=nest123
+      - MYSQL_ROOT_PASSWORD=root123
+      - MYSQL_DATABASE=nest_crud
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - app-network
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: nest-crud-rabbitmq
+    restart: unless-stopped
+    environment:
+      - RABBITMQ_DEFAULT_USER=admin
+      - RABBITMQ_DEFAULT_PASS=admin123
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    networks:
+      - app-network
+
+  redis:
+    image: redis:alpine
+    container_name: nest-crud-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    networks:
+      - app-network
+
+volumes:
+  mysql_data:
+
+networks:
+  app-network:
+    driver: bridge
