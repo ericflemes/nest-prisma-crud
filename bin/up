@@ -1,6 +1,13 @@
 #!/bin/bash
 
-echo "🚀 Starting development environment..."
+# Check if rebuild argument is provided
+REBUILD=false
+if [ "$1" = "rebuild" ]; then
+    REBUILD=true
+    echo "🔄 Starting FULL REBUILD of development environment..."
+else
+    echo "🚀 Starting development environment..."
+fi
 
 # Check if docker is running
 if ! docker info > /dev/null 2>&1; then
@@ -14,9 +21,27 @@ if [ "$(docker ps -q)" ]; then
     docker stop $(docker ps -q)
 fi
 
-# Build and start containers
-echo "📦 Building and starting containers..."
-docker-compose up -d
+if [ "$REBUILD" = true ]; then
+    # Full cleanup for rebuild
+    echo "🧹 Cleaning up all containers, networks, and volumes..."
+    docker-compose down -v
+    
+    # Remove node_modules and dist
+    echo "🗑️ Removing build artifacts..."
+    rm -rf node_modules dist
+    
+    # Rebuild images without cache
+    echo "🏗️ Rebuilding Docker images (no cache)..."
+    docker-compose build --no-cache
+    
+    # Start containers
+    echo "📦 Starting rebuilt containers..."
+    docker-compose up -d
+else
+    # Normal startup
+    echo "📦 Building and starting containers..."
+    docker-compose up -d
+fi
 
 # Wait for database to be ready
 echo "⏳ Waiting for database to be ready..."
@@ -26,8 +51,8 @@ sleep 5
 echo "🔄 Running database migrations..."
 docker-compose exec api npx prisma migrate deploy
 
-# Install dependencies if node_modules doesn't exist
-if [ ! -d "node_modules" ]; then
+# Install dependencies
+if [ "$REBUILD" = true ] || [ ! -d "node_modules" ]; then
     echo "📥 Installing dependencies..."
     npm install
 fi
@@ -35,6 +60,12 @@ fi
 # Generate Prisma client
 echo "⚡ Generating Prisma client..."
 npx prisma generate
+
+# Build application if rebuild flag is set
+if [ "$REBUILD" = true ]; then
+    echo "🔨 Building application..."
+    npm run build
+fi
 
 echo "✨ Development environment is ready!"
 echo "🌐 API is running at http://localhost:3001"
@@ -44,3 +75,4 @@ echo "Useful commands:"
 echo "- View logs: docker-compose logs -f"
 echo "- Stop environment: docker-compose down"
 echo "- Run tests: npm test"
+echo "- Full rebuild: bin/up rebuild"

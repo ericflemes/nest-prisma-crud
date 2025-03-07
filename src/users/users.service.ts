@@ -1,4 +1,4 @@
-import { Injectable, ConflictException } from '@nestjs/common';
+import { Injectable, ConflictException, NotFoundException } from '@nestjs/common';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { PrismaService } from '../prisma/prisma.service';
@@ -54,7 +54,7 @@ export class UsersService {
     return users;
   }
 
-  async findOne(id: number): Promise<User | null> {
+  async findOne(id: number): Promise<User> {
     // Try to get from cache first
     const cachedUser = await this.cacheService.get<User>(`${this.CACHE_PREFIX}${id}`);
     if (cachedUser) {
@@ -66,10 +66,12 @@ export class UsersService {
       where: { id },
     });
 
-    if (user) {
-      // Store in cache
-      await this.cacheService.set(`${this.CACHE_PREFIX}${id}`, user, this.CACHE_TTL);
+    if (!user) {
+      throw new NotFoundException(`User with ID ${id} not found`);
     }
+
+    // Store in cache
+    await this.cacheService.set(`${this.CACHE_PREFIX}${id}`, user, this.CACHE_TTL);
 
     return user;
   }
