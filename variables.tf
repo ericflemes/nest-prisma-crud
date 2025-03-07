@@ -5,9 +5,14 @@ variable "aws_region" {
 }
 
 variable "environment" {
-  description = "Environment name"
+  description = "Environment name (staging or production)"
   type        = string
-  default     = "development"
+  default     = "staging"
+  
+  validation {
+    condition     = contains(["staging", "production"], var.environment)
+    error_message = "The environment value must be 'staging' or 'production'."
+  }
 }
 
 variable "project_name" {

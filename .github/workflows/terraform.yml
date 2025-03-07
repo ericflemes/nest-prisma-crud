@@ -1,0 +1,134 @@
+name: Terraform Infrastructure
+
+on:
+  push:
+    branches:
+      - develop
+      - main
+    paths:
+      - '*.tf'
+      - '.github/workflows/terraform.yml'
+  pull_request:
+    branches:
+      - develop
+      - main
+    paths:
+      - '*.tf'
+  workflow_dispatch:  # Allow manual triggering
+
+env:
+  TF_LOG: INFO
+  TF_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+jobs:
+  terraform:
+    name: Terraform
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.5.0
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+
+      - name: Set environment variables
+        id: env_vars
+        run: |
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "environment=production" >> $GITHUB_OUTPUT
+            echo "TF_WORKSPACE=production" >> $GITHUB_ENV
+          else
+            echo "environment=staging" >> $GITHUB_OUTPUT
+            echo "TF_WORKSPACE=staging" >> $GITHUB_ENV
+          fi
+
+      - name: Setup GCP Auth
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Setup GCP CLI
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Terraform Format
+        id: fmt
+        run: terraform fmt -check
+        continue-on-error: true
+
+      - name: Terraform Init
+        id: init
+        run: terraform init
+        env:
+          GOOGLE_CREDENTIALS: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Terraform Validate
+        id: validate
+        run: terraform validate -no-color
+
+      - name: Terraform Plan
+        id: plan
+        if: github.event_name == 'pull_request'
+        run: terraform plan -no-color -var="environment=${{ steps.env_vars.outputs.environment }}"
+        env:
+          GOOGLE_CREDENTIALS: ${{ secrets.GCP_SA_KEY }}
+        continue-on-error: true
+
+      - name: Update Pull Request
+        uses: actions/github-script@v6
+        if: github.event_name == 'pull_request'
+        env:
+          PLAN: "terraform\n${{ steps.plan.outputs.stdout }}"
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const output = `#### Terraform Format and Style 🖌\`${{ steps.fmt.outcome }}\`
+            #### Terraform Initialization ⚙️\`${{ steps.init.outcome }}\`
+            #### Terraform Validation 🤖\`${{ steps.validate.outcome }}\`
+            #### Terraform Plan 📖\`${{ steps.plan.outcome }}\`
+
+            <details><summary>Show Plan</summary>
+
+            \`\`\`\n
+            ${process.env.PLAN}
+            \`\`\`
+
+            </details>
+
+            *Pushed by: @${{ github.actor }}, Action: \`${{ github.event_name }}\`*`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            })
+
+      - name: Terraform Apply
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        run: terraform apply -auto-approve -var="environment=${{ steps.env_vars.outputs.environment }}"
+        env:
+          GOOGLE_CREDENTIALS: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Extract Terraform Outputs
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        id: terraform_outputs
+        run: |
+          echo "cloud_run_url=$(terraform output -raw cloud_run_url)" >> $GITHUB_OUTPUT
+          echo "database_connection=$(terraform output -raw database_connection)" >> $GITHUB_OUTPUT
+          echo "redis_host=$(terraform output -raw redis_host)" >> $GITHUB_OUTPUT
+        continue-on-error: true
+
+      - name: Update Environment Secrets
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        uses: hmanzur/actions-set-secret@v2.0.0
+        with:
+          name: ${{ steps.env_vars.outputs.environment == 'production' && 'PRODUCTION_DATABASE_URL' || 'STAGING_DATABASE_URL' }}
+          value: ${{ steps.terraform_outputs.outputs.database_connection }}
+          token: ${{ secrets.REPO_ACCESS_TOKEN }}
+        continue-on-error: true
