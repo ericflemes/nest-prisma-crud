@@ -8,6 +8,10 @@ if ! docker info > /dev/null 2>&1; then
     exit 1
 fi
 
+# Stop all running containers
+echo "🛑 Stopping all running Docker containers..."
+docker stop $(docker ps -q) 2>/dev/null || true
+
 # Build and start containers
 echo "📦 Building and starting containers..."
 docker-compose up -d
