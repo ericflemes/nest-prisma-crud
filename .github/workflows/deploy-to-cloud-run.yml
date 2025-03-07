@@ -1,0 +1,55 @@
+name: Deploy to Google Cloud Run
+
+on:
+  push:
+    branches:
+      - master  # Deploy when changes are pushed to master branch
+  workflow_dispatch:  # Allow manual triggering
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  SERVICE_NAME: nest-prisma-crud-api
+  REGION: us-central1  # Change to your preferred GCP region
+
+jobs:
+  deploy:
+    name: Deploy to Cloud Run
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+          service_account_key: ${{ secrets.GCP_SA_KEY }}
+          export_default_credentials: true
+
+      - name: Authorize Docker push
+        run: gcloud auth configure-docker
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true
+          tags: gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Deploy to Cloud Run
+        id: deploy
+        uses: google-github-actions/deploy-cloudrun@v1
+        with:
+          service: ${{ env.SERVICE_NAME }}
+          region: ${{ env.REGION }}
+          image: gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}:${{ github.sha }}
+          flags: --allow-unauthenticated
+
+      - name: Show Output
+        run: echo ${{ steps.deploy.outputs.url }}

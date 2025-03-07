@@ -1,0 +1,74 @@
+name: Deploy to GCP Production
+
+on:
+  push:
+    branches:
+      - main  # Deploy when changes are pushed to main branch
+  workflow_dispatch:  # Allow manual triggering
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  SERVICE_NAME: nest-prisma-crud-production
+  REGION: us-central1  # Change to your preferred GCP region
+
+jobs:
+  deploy:
+    name: Deploy to Cloud Run (Production)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+          service_account_key: ${{ secrets.GCP_SA_KEY }}
+          export_default_credentials: true
+
+      - name: Authorize Docker push
+        run: gcloud auth configure-docker
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true
+          tags: gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            DATABASE_URL=${{ secrets.PRODUCTION_DATABASE_URL }}
+
+      - name: Deploy to Cloud Run
+        id: deploy
+        uses: google-github-actions/deploy-cloudrun@v1
+        with:
+          service: ${{ env.SERVICE_NAME }}
+          region: ${{ env.REGION }}
+          image: gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}:${{ github.sha }}
+          flags: --allow-unauthenticated
+          env_vars: |
+            DATABASE_URL=${{ secrets.PRODUCTION_DATABASE_URL }}
+            NODE_ENV=production
+
+      - name: Show Output
+        run: echo ${{ steps.deploy.outputs.url }}
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v${{ github.run_number }}
+          release_name: Release v${{ github.run_number }}
+          body: |
+            Production deployment of ${{ github.sha }}
+            Deployed to: ${{ steps.deploy.outputs.url }}
+          draft: false
+          prerelease: false
