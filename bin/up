@@ -10,7 +10,9 @@ fi
 
 # Stop all running containers
 echo "🛑 Stopping all running Docker containers..."
-docker stop $(docker ps -q) 2>/dev/null || true
+if [ "$(docker ps -q)" ]; then
+    docker stop $(docker ps -q)
+fi
 
 # Build and start containers
 echo "📦 Building and starting containers..."
