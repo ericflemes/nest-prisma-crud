@@ -1,4 +1,4 @@
-name: Deploy to GCP Staging
+name: Deploy to GCP Staging VM
 
 on:
   push:
@@ -13,7 +13,7 @@ env:
 
 jobs:
   deploy:
-    name: Deploy to Cloud Run (Staging)
+    name: Deploy to VM (Staging)
     runs-on: ubuntu-latest
 
     steps:
@@ -38,23 +38,36 @@ jobs:
         with:
           context: .
           push: true
-          tags: gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}:${{ github.sha }}
+          tags: gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
             DATABASE_URL=${{ secrets.STAGING_DATABASE_URL }}
-
-      - name: Deploy to Cloud Run
-        id: deploy
-        uses: google-github-actions/deploy-cloudrun@v1
-        with:
-          service: ${{ env.SERVICE_NAME }}
-          region: ${{ env.REGION }}
-          image: gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}:${{ github.sha }}
-          flags: --allow-unauthenticated
-          env_vars: |
-            DATABASE_URL=${{ secrets.STAGING_DATABASE_URL }}
+            RABBITMQ_URL=${{ secrets.STAGING_RABBITMQ_URL }}
             NODE_ENV=staging
 
+      - name: Get VM IP address
+        id: get_vm_ip
+        run: |
+          VM_IP=$(terraform -chdir=. output -raw app_url | sed 's|http://||')
+          echo "VM_IP=$VM_IP" >> $GITHUB_OUTPUT
+        continue-on-error: true
+
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.7.0
+        with:
+          ssh-private-key: ${{ secrets.VM_SSH_PRIVATE_KEY }}
+
+      - name: Add VM to known hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H ${{ steps.get_vm_ip.outputs.VM_IP }} >> ~/.ssh/known_hosts
+        continue-on-error: true
+
+      - name: Trigger update on VM
+        run: |
+          ssh ${{ secrets.VM_SSH_USER }}@${{ steps.get_vm_ip.outputs.VM_IP }} 'cd /app && ./update.sh'
+        continue-on-error: true
+
       - name: Show Output
-        run: echo ${{ steps.deploy.outputs.url }}
+        run: echo "Deployed to http://${{ steps.get_vm_ip.outputs.VM_IP }}"
