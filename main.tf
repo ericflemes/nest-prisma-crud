@@ -8,125 +8,163 @@ provider "google" {
 # Configure the random provider
 provider "random" {}
 
-# Generate random password for database
+# Generate random passwords
 resource "random_password" "db_password" {
   length           = 16
   special          = true
   override_special = "_%@"
 }
 
-# Cloud Run service
-resource "google_cloud_run_service" "app" {
-  name     = "nest-prisma-crud-${var.environment}"
-  location = var.region
+resource "random_password" "rabbitmq_password" {
+  length           = 16
+  special          = true
+  override_special = "_%@"
+}
 
-  template {
-    spec {
-      containers {
-        image = "gcr.io/${var.project_id}/nest-prisma-crud-${var.environment}:latest"
-        
-        env {
-          name  = "DATABASE_URL"
-          value = "mysql://root:${random_password.db_password.result}@${google_sql_database_instance.instance.private_ip_address}:3306/nest_prisma_crud"
-        }
-        
-        env {
-          name  = "REDIS_HOST"
-          value = google_redis_instance.cache.host
-        }
-        
-        env {
-          name  = "REDIS_PORT"
-          value = "6379"
-        }
-        
-        env {
-          name  = "NODE_ENV"
-          value = var.environment
-        }
-        
-        resources {
-          limits = {
-            cpu    = "1000m"
-            memory = "512Mi"
-          }
-        }
-      }
+resource "random_password" "redis_password" {
+  length           = 16
+  special          = true
+  override_special = "_%@"
+}
+
+# Single VM to host all services
+resource "google_compute_instance" "app_server" {
+  name         = "nest-prisma-crud-${var.environment}"
+  machine_type = var.environment == "production" ? "e2-standard-2" : "e2-medium"
+  zone         = var.zone
+
+  boot_disk {
+    initialize_params {
+      image = "debian-cloud/debian-11"
+      size  = var.environment == "production" ? 50 : 30
     }
   }
 
-  traffic {
-    percent         = 100
-    latest_revision = true
+  network_interface {
+    network = "default"
+    access_config {
+      // Ephemeral public IP
+    }
   }
-  
-  autogenerate_revision_name = true
-}
 
-# Cloud SQL instance
-resource "google_sql_database_instance" "instance" {
-  name             = "nest-prisma-crud-db-${var.environment}"
-  database_version = "MYSQL_8_0"
-  region           = var.region
+  metadata_startup_script = <<-EOF
+    #!/bin/bash
+    set -e
 
-  settings {
-    tier = var.environment == "production" ? "db-n1-standard-1" : "db-f1-micro"
+    # Update system and install common dependencies
+    apt-get update
+    apt-get install -y curl gnupg apt-transport-https ca-certificates lsb-release git
+
+    # Install Docker
+    curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/debian $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+    apt-get update
+    apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+    systemctl enable docker
+    systemctl start docker
+
+    # Create app directory and clone repository
+    mkdir -p /app
+    cd /app
     
-    backup_configuration {
-      enabled            = var.environment == "production" ? true : false
-      binary_log_enabled = var.environment == "production" ? true : false
-      start_time         = "02:00"
-    }
+    # Clone the repository
+    git clone https://github.com/ericflemes/nest-prisma-crud.git
+    cd nest-prisma-crud
     
-    maintenance_window {
-      day          = 7  # Sunday
-      hour         = 3
-      update_track = "stable"
-    }
+    # Create .env file with secure credentials
+    cat > .env <<'ENV_FILE'
+    DATABASE_URL=mysql://nest:${random_password.db_password.result}@db:3306/nest_crud
+    RABBITMQ_URL=amqp://admin:${random_password.rabbitmq_password.result}@rabbitmq:5672
+    REDIS_URL=redis://redis:6379
+    NODE_ENV=${var.environment}
+    
+    # Database credentials
+    MYSQL_USER=nest
+    MYSQL_PASSWORD=${random_password.db_password.result}
+    MYSQL_ROOT_PASSWORD=${random_password.db_password.result}
+    MYSQL_DATABASE=nest_crud
+    
+    # RabbitMQ credentials
+    RABBITMQ_DEFAULT_USER=admin
+    RABBITMQ_DEFAULT_PASS=${random_password.rabbitmq_password.result}
+    ENV_FILE
+    
+    # Update port in docker-compose.yml to expose on port 80
+    sed -i 's/"3001:3001"/"80:3001"/g' docker-compose.yml
+
+    # Create a script to update the application code and rebuild containers
+    cat > /app/update.sh <<'UPDATE_SCRIPT'
+    #!/bin/bash
+    cd /app
+    
+    # Pull latest code from repository
+    if [ -d "nest-prisma-crud" ]; then
+      cd nest-prisma-crud
+      git pull
+      cd ..
+    else
+      git clone https://github.com/ericflemes/nest-prisma-crud.git
+    fi
+    
+    # Copy docker-compose.yml to the app directory if it doesn't exist
+    if [ ! -f "docker-compose.yml" ]; then
+      cp nest-prisma-crud/docker-compose.yml .
+    fi
+    
+    # Stop and rebuild containers
+    docker compose down
+    docker compose up -d --build
+    UPDATE_SCRIPT
+
+    chmod +x /app/update.sh
+
+    # Setup cron job for database backup if production
+    if [ "${var.environment}" == "production" ]; then
+      cat > /app/backup.sh <<'BACKUP_SCRIPT'
+      #!/bin/bash
+      TIMESTAMP=$(date +%Y%m%d%H%M%S)
+      BACKUP_DIR=/app/backups
+      mkdir -p $BACKUP_DIR
+      
+      # Backup MySQL
+      docker exec nest-crud-db mysqldump -u root -p${random_password.db_password.result} --all-databases > $BACKUP_DIR/mysql_$TIMESTAMP.sql
+      
+      # Compress backup
+      gzip $BACKUP_DIR/mysql_$TIMESTAMP.sql
+      
+      # Remove backups older than 7 days
+      find $BACKUP_DIR -name "mysql_*.sql.gz" -type f -mtime +7 -delete
+      BACKUP_SCRIPT
+      
+      chmod +x /app/backup.sh
+      
+      # Add to crontab - run daily at 2 AM
+      echo "0 2 * * * /app/backup.sh" | crontab -
+    fi
+
+    # Start the application
+    cd /app/nest-prisma-crud
+    docker compose up -d
+  EOF
+
+  tags = ["nest-prisma-crud", var.environment]
+
+  service_account {
+    scopes = ["cloud-platform"]
   }
-  
-  deletion_protection = var.environment == "production" ? true : false
 }
 
-# Create a database
-resource "google_sql_database" "database" {
-  name     = "nest_prisma_crud"
-  instance = google_sql_database_instance.instance.name
-}
+# Firewall rules
+resource "google_compute_firewall" "app_firewall" {
+  name    = "allow-app-${var.environment}"
+  network = "default"
 
-# Create a user
-resource "google_sql_user" "user" {
-  name     = "root"
-  instance = google_sql_database_instance.instance.name
-  password = random_password.db_password.result
-}
-
-# Redis instance
-resource "google_redis_instance" "cache" {
-  name           = "nest-prisma-crud-cache-${var.environment}"
-  memory_size_gb = var.environment == "production" ? 2 : 1
-  region         = var.region
-
-  redis_version = "REDIS_6_X"
-  tier          = "BASIC"
-  
-  auth_enabled = true
-  
-  maintenance_policy {
-    weekly_maintenance_window {
-      day = "SUNDAY"
-      start_time {
-        hours   = 2
-        minutes = 0
-      }
-    }
+  allow {
+    protocol = "tcp"
+    ports    = ["80", "443", "3306", "6379", "5672", "15672"]
   }
+
+  source_ranges = ["0.0.0.0/0"]
+  target_tags   = ["nest-prisma-crud", var.environment]
 }
 
-# Allow unauthenticated access to Cloud Run service
-resource "google_cloud_run_service_iam_member" "public" {
-  service  = google_cloud_run_service.app.name
-  location = google_cloud_run_service.app.location
-  role     = "roles/run.invoker"
-  member   = "allUsers"
-}
